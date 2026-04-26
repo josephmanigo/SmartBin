@@ -1,0 +1,19 @@
+{
+  "name": "smartbin/backend",
+  "description": "SmartBin PHP RESTful API",
+  "type": "project",
+  "require": {
+    "firebase/php-jwt": "^6.11"
+  },
+  "autoload": {
+    "psr-4": {
+      "SmartBin\\": "src/"
+    }
+  },
+  "minimum-stability": "stable",
+  "config": {
+    "audit": {
+      "abandoned": "ignore"
+    }
+  }
+}
