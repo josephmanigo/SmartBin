@@ -3,13 +3,7 @@ import { Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  updateProfile,
-} from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 
 // Helper function to merge class names
 const cn = (...classes: string[]) => {
@@ -249,19 +243,23 @@ export const SignInCard = () => {
       if (!email || !password) { toast.error("Please fill in all fields."); return; }
       setLoading(true);
       try {
-        const cred = await signInWithEmailAndPassword(auth, email, password);
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        
         // Persist a session cookie for SSR middleware
-        const idToken = await cred.user.getIdToken();
-        await fetch('/api/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken }),
-        });
+        const idToken = data.session?.access_token;
+        if (idToken) {
+          await fetch('/api/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken }),
+          });
+        }
         toast.success(`Welcome back!`);
         router.push("/dashboard");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Login failed.';
-        toast.error(firebaseMsg(msg));
+        toast.error(supabaseMsg(msg));
       } finally {
         setLoading(false);
       }
@@ -272,28 +270,38 @@ export const SignInCard = () => {
       if (password.length < 6) { toast.error("Password must be at least 6 characters."); return; }
       setLoading(true);
       try {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        // Save display name in Firebase Auth
-        await updateProfile(cred.user, { displayName: name });
-        // Save profile in Firestore
-        await setDoc(doc(db, 'users', cred.user.uid), {
+        const { data, error } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            data: { name }
+          }
+        });
+        if (error) throw error;
+        if (!data.user) throw new Error('Registration failed.');
+
+        // Save profile in Supabase
+        await supabase.from('users').insert({
+          id: data.user.id,
           name,
           email: email.toLowerCase(),
           avatar: null,
-          created_at: serverTimestamp(),
         });
+
         // Set session cookie
-        const idToken = await cred.user.getIdToken();
-        await fetch('/api/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken }),
-        });
+        const idToken = data.session?.access_token;
+        if (idToken) {
+          await fetch('/api/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken }),
+          });
+        }
         toast.success(`Welcome to SmartBin, ${name}!`);
         router.push("/dashboard");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Registration failed.';
-        toast.error(firebaseMsg(msg));
+        toast.error(supabaseMsg(msg));
       } finally {
         setLoading(false);
       }
@@ -467,15 +475,13 @@ export const SignInCard = () => {
   );
 };
 
-/** Convert Firebase error codes to friendly messages */
-function firebaseMsg(raw: string): string {
-  if (raw.includes('email-already-in-use'))    return 'That email is already registered.';
-  if (raw.includes('user-not-found'))          return 'No account found with that email.';
-  if (raw.includes('wrong-password'))          return 'Incorrect password.';
-  if (raw.includes('invalid-credential'))      return 'Invalid email or password.';
-  if (raw.includes('too-many-requests'))       return 'Too many attempts. Please try again later.';
-  if (raw.includes('weak-password'))           return 'Password must be at least 6 characters.';
-  if (raw.includes('invalid-email'))           return 'Please enter a valid email address.';
+/** Convert Supabase error codes to friendly messages */
+function supabaseMsg(raw: string): string {
+  if (raw.includes('User already registered')) return 'That email is already registered.';
+  if (raw.includes('Invalid login credentials')) return 'Invalid email or password.';
+  if (raw.includes('rate_limit'))              return 'Too many attempts. Please try again later.';
+  if (raw.includes('weak_password'))           return 'Password must be at least 6 characters.';
+  if (raw.includes('invalid_email'))           return 'Please enter a valid email address.';
   return raw;
 }
 

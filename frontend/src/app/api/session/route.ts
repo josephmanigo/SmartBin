@@ -1,7 +1,7 @@
 /**
  * /api/session
  *
- * POST  – set the smartbin_token cookie from a Firebase ID token
+ * POST  – set the smartbin_token cookie from a Supabase access token
  * DELETE – clear the smartbin_token cookie (logout)
  */
 import { NextRequest, NextResponse } from 'next/server';

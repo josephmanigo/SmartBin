@@ -8,17 +8,9 @@ import React, {
   useCallback,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  onAuthStateChanged,
-  signOut,
-  type User as FirebaseUser,
-} from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-import { User } from '@/lib/api';
-
-// Re-export FirebaseUser as an alias so internal code can import it if needed
-export type { FirebaseUser };
+import { supabase } from '@/lib/supabase';
+import { User, authApi } from '@/lib/api';
+import { Session } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user:       User | null;
@@ -40,54 +32,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router                = useRouter();
 
   const logout = useCallback(async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
     setUser(null);
-    // Clear the session cookie set by the API route
-    await fetch('/api/session', { method: 'DELETE' });
+    // Clear the session cookie set by the API route if still used, or just redirect
+    await fetch('/api/session', { method: 'DELETE' }).catch(() => {});
     router.push('/login');
   }, [router]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null);
-        setLoading(false);
+    let mounted = true;
+
+    async function loadUser(session: Session | null) {
+      if (!session) {
+        if (mounted) {
+          setUser(null);
+          setLoading(false);
+        }
         return;
       }
-
-      // Load extra profile data from Firestore
       try {
-        const snap = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (snap.exists()) {
-          const d = snap.data()!;
+        const res = await authApi.me();
+        if (mounted) setUser(res.user);
+      } catch (err) {
+        // Fallback user from auth session
+        if (mounted) {
           setUser({
-            id:         firebaseUser.uid,
-            name:       d.name       ?? firebaseUser.displayName ?? '',
-            email:      d.email      ?? firebaseUser.email       ?? '',
-            avatar:     d.avatar     ?? null,
-            created_at: d.created_at?.toDate?.().toISOString() ?? new Date().toISOString(),
-          });
-        } else {
-          // Fallback: build user from Firebase Auth profile only
-          setUser({
-            id:     firebaseUser.uid,
-            name:   firebaseUser.displayName ?? '',
-            email:  firebaseUser.email       ?? '',
+            id: session.user.id,
+            name: session.user.user_metadata?.name || '',
+            email: session.user.email || '',
             avatar: null,
           });
         }
-      } catch {
-        setUser({
-          id:     firebaseUser.uid,
-          name:   firebaseUser.displayName ?? '',
-          email:  firebaseUser.email       ?? '',
-          avatar: null,
-        });
+      } finally {
+        if (mounted) setLoading(false);
       }
-      setLoading(false);
+    }
+
+    // Initial session fetch
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      loadUser(session);
     });
 
-    return unsub;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      loadUser(session);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const updateUser = (userData: User) => {

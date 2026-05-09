@@ -1,9 +1,8 @@
 /**
  * POST /api/arduino
  *
- * Receives sensor data from Arduino devices and writes to Firestore.
- * This endpoint is **unauthenticated** so Arduino hardware can POST without
- * managing Firebase tokens.
+ * Receives sensor data from Arduino devices and writes to Supabase.
+ * This endpoint is **unauthenticated** so Arduino hardware can POST.
  *
  * Body: { "bin_id": "DEVICE_ID_STRING", "distance": 12.5 }
  *
@@ -11,21 +10,15 @@
  * and having the Arduino send header X-Arduino-Secret: <value>.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { createClient } from '@supabase/supabase-js';
 
-// ── Firebase Admin (server-side only) ────────────────────────────────────────
+// ── Supabase Admin (server-side only, uses Service Role Key to bypass RLS) ────
 function getAdminDb() {
-  const app = getApps().length
-    ? getApp()
-    : initializeApp({
-        credential: cert({
-          projectId:   process.env.FIREBASE_PROJECT_ID!,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
-          privateKey:  (process.env.FIREBASE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n'),
-        }),
-      });
-  return getFirestore(app);
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -63,32 +56,35 @@ export async function POST(req: NextRequest) {
   const adminDb = getAdminDb();
 
   // Find the bin by device_id
-  const binsRef  = adminDb.collection('bins');
-  const snapshot = await binsRef.where('device_id', '==', deviceId).limit(1).get();
+  const { data: bins, error: binError } = await adminDb
+    .from('bins')
+    .select('id, bin_height')
+    .eq('device_id', deviceId)
+    .limit(1);
 
-  if (snapshot.empty) {
+  if (binError || !bins || bins.length === 0) {
     return NextResponse.json({ success: false, message: 'Device not registered.' }, { status: 404 });
   }
 
-  const binDoc   = snapshot.docs[0];
-  const binData  = binDoc.data();
-  const binId    = binDoc.id;
+  const binData  = bins[0];
+  const binId    = binData.id;
   const binHeight = (binData.bin_height as number) ?? 30;
   const status   = calcStatus(distance, binHeight);
 
   // Write log
-  await adminDb.collection('bins').doc(binId).collection('logs').add({
+  await adminDb.from('bin_logs').insert({
+    bin_id: binId,
     distance,
     status,
-    created_at: FieldValue.serverTimestamp(),
+    created_at: new Date().toISOString(),
   });
 
   // Update bin summary
-  await adminDb.collection('bins').doc(binId).update({
+  await adminDb.from('bins').update({
     status,
     last_distance: distance,
-    last_updated:  FieldValue.serverTimestamp(),
-  });
+    last_updated:  new Date().toISOString(),
+  }).eq('id', binId);
 
   return NextResponse.json({
     success:  true,
