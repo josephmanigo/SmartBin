@@ -11,6 +11,9 @@ export const metadata: Metadata = {
   description:
     'Monitor and manage your smart trash bins in real-time. Get instant alerts when bins are full.',
   keywords: 'IoT, waste management, smart bin, monitoring, dashboard',
+  icons: {
+    icon: '/logo.png',
+  },
 };
 
 export default function RootLayout({
