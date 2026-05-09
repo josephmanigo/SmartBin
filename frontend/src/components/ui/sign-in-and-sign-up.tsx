@@ -1,10 +1,15 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useAuth } from "@/context/AuthContext";
-import { authApi } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile,
+} from "firebase/auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 
 // Helper function to merge class names
 const cn = (...classes: string[]) => {
@@ -70,7 +75,7 @@ const DotMap = () => {
     {
       start: { x: 100, y: 150, delay: 0 },
       end: { x: 200, y: 80, delay: 2 },
-      color: "#2563eb", // Slightly darker blue for better visibility on light bg
+      color: "#2563eb",
     },
     {
       start: { x: 200, y: 80, delay: 2 },
@@ -95,22 +100,14 @@ const DotMap = () => {
     const gap = 12;
     const dotRadius = 1;
 
-    // Create a dot grid pattern with random opacity
     for (let x = 0; x < width; x += gap) {
       for (let y = 0; y < height; y += gap) {
-        // Shape the dots to form a world map silhouette
         const isInMapShape =
-          // North America
           ((x < width * 0.25 && x > width * 0.05) && (y < height * 0.4 && y > height * 0.1)) ||
-          // South America
           ((x < width * 0.25 && x > width * 0.15) && (y < height * 0.8 && y > height * 0.4)) ||
-          // Europe
           ((x < width * 0.45 && x > width * 0.3) && (y < height * 0.35 && y > height * 0.15)) ||
-          // Africa
           ((x < width * 0.5 && x > width * 0.35) && (y < height * 0.65 && y > height * 0.35)) ||
-          // Asia
           ((x < width * 0.7 && x > width * 0.45) && (y < height * 0.5 && y > height * 0.1)) ||
-          // Australia
           ((x < width * 0.8 && x > width * 0.65) && (y < height * 0.8 && y > height * 0.6));
 
         if (isInMapShape && Math.random() > 0.3) {
@@ -118,7 +115,7 @@ const DotMap = () => {
             x,
             y,
             radius: dotRadius,
-            opacity: Math.random() * 0.5 + 0.2, // Slightly higher opacity for light theme
+            opacity: Math.random() * 0.5 + 0.2,
           });
         }
       }
@@ -154,34 +151,29 @@ const DotMap = () => {
     let animationFrameId: number;
     let startTime = Date.now();
 
-    // Draw background dots
     function drawDots() {
       ctx.clearRect(0, 0, dimensions.width, dimensions.height);
-      
-      // Draw the dots
       dots.forEach(dot => {
         ctx.beginPath();
         ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(37, 99, 235, ${dot.opacity})`; // Blue dots for light theme
+        ctx.fillStyle = `rgba(37, 99, 235, ${dot.opacity})`;
         ctx.fill();
       });
     }
 
-    // Draw animated routes
     function drawRoutes() {
-      const currentTime = (Date.now() - startTime) / 1000; // Time in seconds
+      const currentTime = (Date.now() - startTime) / 1000;
       
       routes.forEach(route => {
         const elapsed = currentTime - route.start.delay;
         if (elapsed <= 0) return;
         
-        const duration = 3; // Animation duration in seconds
+        const duration = 3;
         const progress = Math.min(elapsed / duration, 1);
         
         const x = route.start.x + (route.end.x - route.start.x) * progress;
         const y = route.start.y + (route.end.y - route.start.y) * progress;
         
-        // Draw the route line
         ctx.beginPath();
         ctx.moveTo(route.start.x, route.start.y);
         ctx.lineTo(x, y);
@@ -189,25 +181,21 @@ const DotMap = () => {
         ctx.lineWidth = 1.5;
         ctx.stroke();
         
-        // Draw the start point
         ctx.beginPath();
         ctx.arc(route.start.x, route.start.y, 3, 0, Math.PI * 2);
         ctx.fillStyle = route.color;
         ctx.fill();
         
-        // Draw the moving point
         ctx.beginPath();
         ctx.arc(x, y, 3, 0, Math.PI * 2);
         ctx.fillStyle = "#3b82f6";
         ctx.fill();
         
-        // Add glow effect to the moving point
         ctx.beginPath();
         ctx.arc(x, y, 6, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(59, 130, 246, 0.4)";
         ctx.fill();
         
-        // If the route is complete, draw the end point
         if (progress === 1) {
           ctx.beginPath();
           ctx.arc(route.end.x, route.end.y, 3, 0, Math.PI * 2);
@@ -217,14 +205,12 @@ const DotMap = () => {
       });
     }
     
-    // Animation loop
     function animate() {
       drawDots();
       drawRoutes();
       
-      // If all routes are complete, restart the animation
       const currentTime = (Date.now() - startTime) / 1000;
-      if (currentTime > 15) { // Reset after 15 seconds
+      if (currentTime > 15) {
         startTime = Date.now();
       }
       
@@ -253,8 +239,66 @@ export const SignInCard = () => {
   const [isHovered, setIsHovered] = useState(false);
   const [loading, setLoading] = useState(false);
   
-  const { login } = useAuth();
   const router = useRouter();
+
+  const handleSubmit = async (e: React.MouseEvent) => {
+    e.preventDefault();
+
+    if (isLogin) {
+      // ── Sign In ──────────────────────────────────────────────────────────
+      if (!email || !password) { toast.error("Please fill in all fields."); return; }
+      setLoading(true);
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        // Persist a session cookie for SSR middleware
+        const idToken = await cred.user.getIdToken();
+        await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        });
+        toast.success(`Welcome back!`);
+        router.push("/dashboard");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Login failed.';
+        toast.error(firebaseMsg(msg));
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // ── Register ─────────────────────────────────────────────────────────
+      if (!name || !email || !password || !confirmPassword) { toast.error("Please fill in all fields."); return; }
+      if (password !== confirmPassword) { toast.error("Passwords do not match."); return; }
+      if (password.length < 6) { toast.error("Password must be at least 6 characters."); return; }
+      setLoading(true);
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        // Save display name in Firebase Auth
+        await updateProfile(cred.user, { displayName: name });
+        // Save profile in Firestore
+        await setDoc(doc(db, 'users', cred.user.uid), {
+          name,
+          email: email.toLowerCase(),
+          avatar: null,
+          created_at: serverTimestamp(),
+        });
+        // Set session cookie
+        const idToken = await cred.user.getIdToken();
+        await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        });
+        toast.success(`Welcome to SmartBin, ${name}!`);
+        router.push("/dashboard");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Registration failed.';
+        toast.error(firebaseMsg(msg));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
   
   return (
     <div className="flex w-full h-full items-center justify-center">
@@ -296,44 +340,6 @@ export const SignInCard = () => {
             <p className="text-gray-500 mb-8">
               {isLogin ? "Sign in to manage your smart bins" : "Sign up to manage your smart bins"}
             </p>
-            
-            <div className="mb-6">
-              <button 
-                className="w-full flex items-center justify-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-all duration-300 text-gray-700 shadow-sm"
-                onClick={() => console.log("Google sign-in")}
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24">
-                  <path
-                    fill="currentColor"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    fillOpacity=".54"
-                  />
-                  <path
-                    fill="#4285F4"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                  />
-                  <path fill="#EA4335" d="M1 1h22v22H1z" fillOpacity="0" />
-                </svg>
-                <span>Continue with Google</span>
-              </button>
-            </div>
-            
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">or</span>
-              </div>
-            </div>
             
             <form className="space-y-5">
               {!isLogin && (
@@ -425,37 +431,7 @@ export const SignInCard = () => {
                     "w-full bg-gradient-to-r relative overflow-hidden from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white py-2 rounded-lg transition-all duration-300",
                     isHovered ? "shadow-lg shadow-emerald-200" : ""
                   )}
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    if (isLogin) {
-                      if (!email || !password) { toast.error("Please fill in all fields."); return; }
-                      setLoading(true);
-                      try {
-                        const res = await authApi.login({ email, password });
-                        login(res.token, res.user);
-                        toast.success(`Welcome back, ${res.user.name}!`);
-                        router.push("/dashboard");
-                      } catch (err: any) {
-                        toast.error(err.message || "Login failed.");
-                      } finally {
-                        setLoading(false);
-                      }
-                    } else {
-                      if (!name || !email || !password || !confirmPassword) { toast.error("Please fill in all fields."); return; }
-                      if (password !== confirmPassword) { toast.error("Passwords do not match."); return; }
-                      setLoading(true);
-                      try {
-                        const res = await authApi.register({ name, email, password });
-                        login(res.token, res.user);
-                        toast.success(`Welcome to SmartBin, ${res.user.name}!`);
-                        router.push("/dashboard");
-                      } catch (err: any) {
-                        toast.error(err.message || "Registration failed.");
-                      } finally {
-                        setLoading(false);
-                      }
-                    }
-                  }}
+                  onClick={handleSubmit}
                 >
                   <span className="flex items-center justify-center">
                     {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
@@ -490,6 +466,18 @@ export const SignInCard = () => {
     </div>
   );
 };
+
+/** Convert Firebase error codes to friendly messages */
+function firebaseMsg(raw: string): string {
+  if (raw.includes('email-already-in-use'))    return 'That email is already registered.';
+  if (raw.includes('user-not-found'))          return 'No account found with that email.';
+  if (raw.includes('wrong-password'))          return 'Incorrect password.';
+  if (raw.includes('invalid-credential'))      return 'Invalid email or password.';
+  if (raw.includes('too-many-requests'))       return 'Too many attempts. Please try again later.';
+  if (raw.includes('weak-password'))           return 'Password must be at least 6 characters.';
+  if (raw.includes('invalid-email'))           return 'Please enter a valid email address.';
+  return raw;
+}
 
 const Index = () => {
   return (

@@ -7,24 +7,30 @@ import Navbar from '@/components/Navbar';
 import { useAuth } from '@/context/AuthContext';
 import { authApi, User as UserType } from '@/lib/api';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 
 export default function ProfilePage() {
   const { user, loading: al, updateUser } = useAuth();
   const router                = useRouter();
   const [profile, setProfile] = useState<UserType | null>(null);
-  const [loading, setLoad]    = useState(true);
+  const [loading, setLoad]    = useState(false);
 
+  // Redirect if not logged in
   useEffect(() => {
     if (!al && !user) { router.replace('/login'); return; }
+    // Seed profile from AuthContext user immediately; then refresh from Firestore
     if (!al && user) {
+      setProfile(user);
       authApi.me()
-        .then(r => setProfile(r.user))
-        .catch(() => setProfile(user))
-        .finally(() => setLoad(false));
+        .then(r => {
+          setProfile(r.user);
+          updateUser(r.user);
+        })
+        .catch(() => { /* use cached user from context */ });
     }
   }, [al, user, router]);
 
-  if (al || loading) {
+  if (al) {
     return (
       <div className="bg-mesh min-h-screen">
         <Navbar />
@@ -63,10 +69,9 @@ export default function ProfilePage() {
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  
-                  // Check size (max 2MB)
+
                   if (file.size > 2 * 1024 * 1024) {
-                    import('react-hot-toast').then(t => t.default.error('Image must be less than 2MB.'));
+                    toast.error('Image must be less than 2MB.');
                     return;
                   }
 
@@ -79,9 +84,9 @@ export default function ProfilePage() {
                       const updatedUser = { ...profile!, avatar: base64 };
                       setProfile(updatedUser);
                       updateUser(updatedUser);
-                      import('react-hot-toast').then(t => t.default.success('Avatar updated!'));
-                    } catch (error) {
-                      import('react-hot-toast').then(t => t.default.error('Failed to update avatar.'));
+                      toast.success('Avatar updated!');
+                    } catch {
+                      toast.error('Failed to update avatar.');
                     } finally {
                       setLoad(false);
                     }
@@ -90,6 +95,7 @@ export default function ProfilePage() {
                 }}
               />
             </div>
+            {loading && <Loader2 className="w-5 h-5 animate-spin text-emerald-600 mb-2" />}
             <h2 className="text-xl font-semibold text-slate-900">{profile?.name}</h2>
             <p className="text-slate-500 text-sm">{profile?.email}</p>
           </div>
@@ -97,8 +103,8 @@ export default function ProfilePage() {
           {/* Info rows */}
           <div className="space-y-4">
             {[
-              { icon: User,     label: 'Full Name',  value: profile?.name     ?? '—' },
-              { icon: Mail,     label: 'Email',      value: profile?.email    ?? '—' },
+              { icon: User,     label: 'Full Name',    value: profile?.name     ?? '—' },
+              { icon: Mail,     label: 'Email',        value: profile?.email    ?? '—' },
               { icon: Calendar, label: 'Member Since', value: profile?.created_at
                   ? format(new Date(profile.created_at), 'MMMM d, yyyy')
                   : '—'

@@ -44,8 +44,8 @@ export default function BinDetailPage() {
     else setRef(true);
     try {
       const [binRes, logRes] = await Promise.all([
-        binsApi.get(Number(id)),
-        binsApi.logs(Number(id), 50),
+        binsApi.get(id),           // id is already a string
+        binsApi.logs(id, 50),
       ]);
       setBin(binRes.bin);
       setLogs(logRes.logs);

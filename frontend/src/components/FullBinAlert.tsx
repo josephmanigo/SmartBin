@@ -6,7 +6,7 @@ import { Bin } from '@/lib/api';
 
 interface Props {
   fullBins:   Bin[];
-  onDismiss:  (id: number) => void;
+  onDismiss:  (id: string) => void;
 }
 
 export default function FullBinAlert({ fullBins, onDismiss }: Props) {

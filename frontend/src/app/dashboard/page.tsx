@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import BinCard from '@/components/BinCard';
 import BinModal from '@/components/BinModal';
 import DeleteModal from '@/components/DeleteModal';
 import FullBinAlert from '@/components/FullBinAlert';
 import { useAuth } from '@/context/AuthContext';
-import { binsApi, Bin, BinFormData } from '@/lib/api';
+import { binsApi, Bin, BinFormData, GlobalBinLog } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 const POLL_INTERVAL = 8000; // 8 seconds
@@ -28,10 +28,10 @@ export default function DashboardPage() {
   const [deleteBin, setDeleteBin] = useState<Bin | null>(null);
 
   // Notifications: track which full bins have been dismissed
-  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
-  const prevStatusRef = useRef<Record<number, string>>({});
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const prevStatusRef = useRef<Record<string, string>>({});
 
-  const [logs, setLogs]           = useState<import('@/lib/api').GlobalBinLog[]>([]);
+  const [logs, setLogs] = useState<GlobalBinLog[]>([]);
 
   // ── Fetch bins & logs ────────────────────────────────────────────────────────────
   const fetchBins = useCallback(async (silent = false) => {
@@ -39,14 +39,14 @@ export default function DashboardPage() {
     try {
       const [binsRes, logsRes] = await Promise.all([
         binsApi.list(),
-        binsApi.allLogs()
+        binsApi.allLogs(),
       ]);
       setBins(binsRes.bins);
       setLogs(logsRes.logs);
       setOnline(true);
 
       // Check for newly full bins
-      res.bins.forEach(bin => {
+      binsRes.bins.forEach(bin => {
         const prev = prevStatusRef.current[bin.id];
         if (bin.status === 'Full' && prev !== 'Full') {
           // New full bin → clear its dismiss
