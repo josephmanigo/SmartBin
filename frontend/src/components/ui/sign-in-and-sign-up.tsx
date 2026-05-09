@@ -297,8 +297,9 @@ export const SignInCard = () => {
             body: JSON.stringify({ idToken }),
           });
         }
-        toast.success(`Welcome to SmartBin, ${name}!`);
-        router.push("/dashboard");
+        toast.success(`Account created! Please sign in.`);
+        setIsLogin(true);
+        router.push("/login");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Registration failed.';
         toast.error(supabaseMsg(msg));
