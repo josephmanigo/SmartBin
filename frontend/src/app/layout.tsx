@@ -7,7 +7,7 @@ import { Toaster } from 'react-hot-toast';
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'SmartBin – IoT Waste Monitoring Platform',
+  title: 'SmartBin',
   description:
     'Monitor and manage your smart trash bins in real-time. Get instant alerts when bins are full.',
   keywords: 'IoT, waste management, smart bin, monitoring, dashboard',
